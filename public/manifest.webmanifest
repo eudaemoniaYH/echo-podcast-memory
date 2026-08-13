@@ -1,0 +1,32 @@
+{
+  "id": "/",
+  "name": "回声 · Podcast Memory",
+  "short_name": "回声",
+  "description": "把小宇宙、机核与 Apple Podcasts 的收听轨迹，变成持续生长的个人播客知识库。",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f3efe7",
+  "theme_color": "#214b3c",
+  "icons": [
+    {
+      "src": "/icons/echo-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/echo-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/echo-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

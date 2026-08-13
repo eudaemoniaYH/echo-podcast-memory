@@ -1,0 +1,29 @@
+{
+  "name": "echo-podcast-memory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-first podcast listening analytics and AI-assisted knowledge memory",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eudaemoniaYH/echo-podcast-memory.git"
+  },
+  "homepage": "https://github.com/eudaemoniaYH/echo-podcast-memory#readme",
+  "keywords": [
+    "podcast",
+    "local-first",
+    "knowledge-management",
+    "listening-analytics",
+    "pwa"
+  ],
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "package:extension": "node scripts/package-extension.js",
+    "test": "node --test",
+    "check": "node --check src/server.js && node --check public/app.js && node --check extension/popup.js && node --test"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

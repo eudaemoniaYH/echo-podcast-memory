@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="utf-8"><link rel="stylesheet" href="popup.css"><title>回声连接器</title></head>
+  <body>
+    <header><span class="logo">回</span><div><strong>回声连接器</strong><small>只读 · 仅发送到本机</small></div></header>
+    <label>仪表盘配对码<input id="pairingCode" maxlength="12" placeholder="12 位短时配对码" autocomplete="off"></label>
+    <section>
+      <div><strong>小宇宙</strong><small>先登录播客后台网页</small></div>
+      <button data-connect="xiaoyuzhou">连接</button>
+    </section>
+    <section>
+      <div><strong>机核</strong><small>先登录 gcores.com</small></div>
+      <button data-connect="gcores">连接</button>
+    </section>
+    <p id="status"></p>
+    <script src="popup.js"></script>
+  </body>
+</html>

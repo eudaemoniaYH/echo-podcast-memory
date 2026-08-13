@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title description">
+  <title id="title">回声</title>
+  <desc id="description">深绿色底上的酸绿色回字</desc>
+  <rect width="512" height="512" fill="#214b3c"/>
+  <circle cx="420" cy="92" r="34" fill="#c7ff52" opacity=".16"/>
+  <path fill="#c7ff52" fill-rule="evenodd" d="M104 96h304v320H104V96Zm50 50v220h204V146H154Zm36 44h132v132H190V190Zm39 39v54h54v-54h-54Z"/>
+</svg>

@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#214b3c">
+    <meta name="description" content="把小宇宙、机核与 Apple Podcasts 的收听轨迹，变成持续生长的个人播客知识库。">
+    <meta name="application-name" content="回声">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="回声">
+    <title>回声 · Podcast Memory</title>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" href="/icons/echo.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/echo-180.png">
+    <link rel="stylesheet" href="/styles.css?v=6">
+    <script src="/sw.js" defer></script>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="brand" href="#"><span class="brand-mark">回</span><span>回声</span></a>
+        <div class="top-actions">
+          <span id="automationStatus" class="automation-status" aria-live="polite">自动同步准备中</span>
+          <span id="demoBadge" class="tag demo" hidden>演示数据</span>
+          <button id="refreshButton" class="icon-button" aria-label="刷新数据">↻</button>
+          <span class="avatar" aria-label="本地个人资料">私</span>
+        </div>
+      </header>
+
+      <section id="installCard" class="install-card" hidden>
+        <div class="install-icon">回</div>
+        <div>
+          <strong>把回声装到 iPhone 主屏幕</strong>
+          <p>在 Safari 点“分享” → “添加到主屏幕” → 打开“作为 Web App”。之后它会像普通 App 一样独立运行。</p>
+        </div>
+        <button id="dismissInstall" type="button" aria-label="暂不显示安装提示">稍后</button>
+      </section>
+
+      <main>
+        <section class="hero">
+          <div>
+            <p class="eyebrow">YOUR LISTENING MEMORY</p>
+            <h1>听过的声音，<br><em>留下来。</em></h1>
+            <p class="hero-copy">把小宇宙、机核与 Apple Podcasts 的收听轨迹，变成一份持续生长的个人知识地图。</p>
+          </div>
+          <div class="pairing-card">
+            <span>本机连接器配对码</span>
+            <strong id="pairingCode">········</strong>
+            <small>只在首次绑定浏览器连接器时使用</small>
+          </div>
+        </section>
+
+        <section class="connectors" aria-label="平台连接状态">
+          <article class="connector-card" data-platform="xiaoyuzhou">
+            <span class="platform-icon" aria-hidden="true"><span class="platform-token">XY</span></span>
+            <div class="connector-copy">
+              <p class="platform-name">小宇宙</p>
+              <p class="status-line">等待读取状态</p>
+            </div>
+            <button class="sync-button" data-sync="xiaoyuzhou" data-mode="connect" aria-label="连接小宇宙">连接</button>
+          </article>
+          <article class="connector-card" data-platform="gcores">
+            <span class="platform-icon" aria-hidden="true"><span class="platform-token">GC</span></span>
+            <div class="connector-copy">
+              <p class="platform-name">机核</p>
+              <p class="status-line">等待读取状态</p>
+            </div>
+            <button class="sync-button" data-sync="gcores" data-mode="connect" aria-label="连接机核">连接</button>
+          </article>
+          <article class="connector-card" data-platform="apple-podcasts">
+            <span class="platform-icon" aria-hidden="true"><span class="platform-token">AP</span></span>
+            <div class="connector-copy">
+              <p class="platform-name">Apple Podcasts</p>
+              <p class="status-line">正在检测 Mac 播客资料库</p>
+            </div>
+            <button class="sync-button" data-sync="apple-podcasts" data-mode="sync" aria-label="检查 Apple Podcasts">检查</button>
+          </article>
+        </section>
+
+        <section class="metrics">
+          <article class="metric-card primary">
+            <p>当前可统计时长</p>
+            <strong id="totalHours">0</strong><span>小时</span>
+            <small id="estimateHint">小宇宙累计 0 小时</small>
+          </article>
+          <article class="metric-card">
+            <p>听过的单集</p>
+            <strong id="episodeCount">0</strong><span>期</span>
+            <small>三个平台统一整理的收听记录</small>
+          </article>
+          <article class="metric-card">
+            <p>知识来源</p>
+            <strong id="podcastCount">0</strong><span>档</span>
+            <small>持续积累的播客节目</small>
+          </article>
+        </section>
+
+        <section class="dashboard-grid">
+          <article class="panel chart-panel">
+            <div class="panel-heading"><div><p class="eyebrow">RHYTHM</p><h2>收听节奏</h2></div><span class="legend">小宇宙月度时长</span></div>
+            <div id="monthlyChart" class="bar-chart"></div>
+          </article>
+          <article class="panel topics-panel">
+            <div class="panel-heading"><div><p class="eyebrow">TOPICS</p><h2>主题地图</h2></div></div>
+            <div id="topicList" class="topic-list"></div>
+          </article>
+        </section>
+
+        <section class="memory-section">
+          <div class="memory-heading">
+            <div>
+              <p class="eyebrow">KNOWLEDGE MEMORY</p>
+              <h2>文字回顾</h2>
+              <p>听完一集后，自动依据节目简介与时间轴生成分类、摘要、要点和回看提纲；也可以随时手动重新生成。</p>
+            </div>
+            <div class="ai-setup">
+              <span id="aiStatus" class="ai-status">正在检查 AI 设置</span>
+              <button id="configureAI" class="secondary-button" type="button">查看自动回顾</button>
+            </div>
+          </div>
+          <div class="memory-toolbar">
+            <input id="memorySearch" type="search" placeholder="搜索单集、播客或文字回顾">
+            <select id="memoryPlatform" aria-label="筛选平台">
+              <option value="">全部平台</option>
+              <option value="xiaoyuzhou">小宇宙</option>
+              <option value="gcores">机核</option>
+              <option value="apple-podcasts">Apple Podcasts</option>
+            </select>
+            <select id="memoryTopic" aria-label="筛选主题">
+              <option value="">全部主题</option>
+              <option>AI 与科技</option><option>游戏</option><option>商业与经济</option>
+              <option>影视与文化</option><option>社会与历史</option><option>生活与成长</option>
+              <option>科学与健康</option><option>旅行与地域</option><option>人物访谈</option><option>其他</option>
+            </select>
+            <label class="summary-filter"><input id="summarizedOnly" type="checkbox"> 只看已有回顾</label>
+          </div>
+          <div id="memoryList" class="memory-list"><p class="empty">正在读取播客资料库…</p></div>
+        </section>
+
+        <section class="library-section">
+          <div class="section-heading">
+            <div><p class="eyebrow">RECENTLY HEARD</p><h2>最近收听</h2></div>
+            <span class="muted">进度来自平台；机核与 Apple 历史时长为估算</span>
+          </div>
+          <div id="episodeList" class="episode-list"></div>
+        </section>
+      </main>
+      <footer>收听数据库留在这台 Mac · 快速回顾通过已登录的 ChatGPT/Codex 订阅生成</footer>
+    </div>
+    <div id="connectionModal" class="modal" hidden>
+      <div class="modal-backdrop" data-close-connection></div>
+      <section class="connection-dialog" role="dialog" aria-modal="true" aria-labelledby="connectionTitle">
+        <button class="modal-close" type="button" aria-label="关闭连接向导" data-close-connection>×</button>
+        <p class="eyebrow">ONE-TIME SETUP</p>
+        <h2 id="connectionTitle">连接播客账号</h2>
+        <p id="connectionIntro" class="connection-intro">只需完成一次设置，之后会自动同步。</p>
+
+        <ol class="setup-steps">
+          <li>
+            <span class="step-number">1</span>
+            <div>
+              <strong>在 Chrome 加载回声连接器</strong>
+              <p>打开 <code>chrome://extensions</code>，开启“开发者模式”，点击“加载已解压的扩展程序”。</p>
+              <div class="step-actions">
+                <button id="copyChromeUrl" class="secondary-button" type="button">复制扩展管理地址</button>
+              </div>
+            </div>
+          </li>
+          <li>
+            <span class="step-number">2</span>
+            <div>
+              <strong>选择项目里的连接器目录</strong>
+              <p>在文件选择器中打开你 clone 下来的项目，并选择其中的 <code>extension</code> 文件夹。</p>
+            </div>
+          </li>
+          <li>
+            <span class="step-number">3</span>
+            <div>
+              <strong id="loginStepTitle">登录播客平台网页</strong>
+              <p>请在安装连接器的同一个 Chrome 中完成登录。连接器只读取已有登录会话，不会获得你的密码。</p>
+              <div class="step-actions">
+                <a id="platformLoginLink" class="primary-link" href="#" target="_blank" rel="noreferrer">打开登录页面 ↗</a>
+                <button id="copyPlatformLogin" class="secondary-button" type="button">复制登录地址</button>
+              </div>
+            </div>
+          </li>
+          <li>
+            <span class="step-number">4</span>
+            <div>
+              <strong>打开 Chrome 工具栏里的“回声连接器”</strong>
+              <p>输入下面的配对码，然后点击对应平台的“连接”。</p>
+              <div class="modal-code"><code id="modalPairingCode">········</code><button id="copyPairingCode" type="button">复制</button></div>
+            </div>
+          </li>
+        </ol>
+
+        <div class="privacy-note">令牌只发送到这台 Mac 的 <code>127.0.0.1</code>，并保存在 macOS 钥匙串。</div>
+        <button id="checkConnection" class="dialog-primary" type="button">我已连接，刷新状态</button>
+      </section>
+    </div>
+    <div id="episodeModal" class="modal" hidden>
+      <div class="modal-backdrop" data-close-episode></div>
+      <section class="episode-dialog" role="dialog" aria-modal="true" aria-labelledby="episodeDetailTitle">
+        <button class="modal-close" type="button" aria-label="关闭单集详情" data-close-episode>×</button>
+        <div id="episodeDetail"><p class="empty">正在读取单集资料…</p></div>
+      </section>
+    </div>
+    <div id="aiModal" class="modal" hidden>
+      <div class="modal-backdrop" data-close-ai></div>
+      <section class="ai-dialog" role="dialog" aria-modal="true" aria-labelledby="aiDialogTitle">
+        <button class="modal-close" type="button" aria-label="关闭 AI 设置" data-close-ai>×</button>
+        <p class="eyebrow">CHATGPT SUBSCRIPTION</p>
+        <h2 id="aiDialogTitle">自动快速回顾</h2>
+        <p id="aiModalStatus" class="connection-intro">正在检查这台 Mac 的 ChatGPT 登录状态。</p>
+        <div class="privacy-note"><strong>触发规则</strong><br>小宇宙使用平台的“已听完”标志；机核在播放达到 98% 或距结尾不到 60 秒时视为听完；Apple 只用 Mac 同步下来的明确“已播放”状态触发，并排除单纯手动标记。每个平台第一次启用只建立基线，不会批量处理过去的历史。</div>
+        <div class="privacy-note"><strong>费用与隐私</strong><br>节目简介和时间轴会发送给 OpenAI，由这台 Mac 已登录的 Codex 使用你的 ChatGPT 订阅额度生成；不会调用按量计费的 Platform API。SQLite、平台令牌和生成结果仍留在 Mac。</div>
+        <div class="privacy-note">自动任务只生成快速回顾，不会上传或转写整期音频。Mac 需要开机、联网并保持 ChatGPT/Codex 登录。</div>
+        <div hidden aria-hidden="true"><input id="openaiApiKey" tabindex="-1"><button id="saveAIKey" type="button" tabindex="-1"></button></div>
+        <button id="checkAIConnection" class="dialog-primary" type="button">重新检查 ChatGPT 登录</button>
+      </section>
+    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/app.js?v=6"></script>
+  </body>
+</html>

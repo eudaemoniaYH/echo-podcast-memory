@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "回声 · 播客连接器",
+  "version": "0.1.1",
+  "description": "将已登录的小宇宙和机核账号只读连接到本机 Podcast Memory。",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtgeudwk50fAft5Gd3sgTUaO7wZDAVYrhVN62Tchk0sUsl/2wpEOnQAoW56GK1xevWtaRijFrx3oz+H4uyRkY3bOxA7kUOHOXD8a3stZ5GWDaNsidgFGHjBrrspJJO9YcEWc1aS7d9e0mlZuwVArxwoQQImhm8FG8eEDUX/iTk1SKhJHimLwcDeHYfQLo9D1AZHVK2y5KAo95WOXXLA7WGR52lTDhzNSLwBVbbRYtii2GZMpuXRsCIJcyb4Uzqo2+OThsGtAAWK9EjRsvEliHoB/CD6vQc7IZX3lUizVaODeoRrrgDFaFR+9eB3QvHfbQXDp3zHSM3MVz41nNeayDQQIDAQAB",
+  "permissions": ["cookies"],
+  "host_permissions": [
+    "https://podcaster.xiaoyuzhoufm.com/*",
+    "https://www.gcores.com/*",
+    "http://127.0.0.1:8787/*"
+  ],
+  "action": {
+    "default_title": "连接播客账号",
+    "default_popup": "popup.html"
+  }
+}
