@@ -99,7 +99,9 @@ test("recent episodes use the progress from the same latest sample", () => {
   db.addPlaybackSample({ platform: "gcores", episodeId: firstId, progressSeconds: 100, observedAt: "2026-07-03T00:00:00.000Z", source: "test", isEstimated: true });
   db.addPlaybackSample({ platform: "gcores", episodeId: secondId, progressSeconds: 500, observedAt: "2026-07-04T00:00:00.000Z", source: "test", isEstimated: true });
   const recent = db.dashboard().recent;
-  assert.equal(recent[0].id, secondId);
+  assert.equal(recent[0].title, "更新的一期");
+  assert.match(recent[0].id, /^ep_[0-9a-f-]{36}$/);
+  assert.notEqual(recent[0].id, secondId);
   assert.equal(recent[1].progress_seconds, 100);
   assert.equal(recent[1].observed_at, "2026-07-03T00:00:00.000Z");
   db.close();
@@ -215,6 +217,33 @@ test("sparse metadata refreshes do not erase richer saved episode data", () => {
   assert.equal(detail.duration_seconds, 3600);
   assert.equal(detail.description, "完整节目简介");
   assert.equal(detail.podcast_author, "机核");
+  db.close();
+});
+
+test("Apple refreshes remove stored media URLs that may contain private feed credentials", () => {
+  const db = new PodcastDatabase(":memory:");
+  const apple = {
+    ...episode,
+    platform: "apple-podcasts",
+    externalId: "apple-private",
+    audioUrl: "https://private.example/audio.mp3?token=secret",
+    imageUrl: "https://private.example/cover.jpg",
+    podcast: { externalId: "apple-show", title: "Apple 私有节目", author: "" },
+    raw: { source: "legacy", feedUrl: "https://private.example/feed?token=secret" }
+  };
+  const episodeId = db.upsertEpisode(apple);
+  db.upsertEpisode({ ...apple, audioUrl: null, imageUrl: null, raw: { source: "mac-podcasts-library" } });
+  const detail = db.episodeDetail(episodeId);
+  assert.equal(detail.audio_url, null);
+  assert.equal(detail.image_url, null);
+  assert.deepEqual(JSON.parse(detail.metadata_json), { source: "mac-podcasts-library" });
+  const storedPodcast = db.db.prepare("SELECT image_url, metadata_json FROM podcasts WHERE id=?").get("apple-podcasts:podcast:apple-show");
+  assert.equal(storedPodcast.image_url, null);
+  assert.deepEqual(JSON.parse(storedPodcast.metadata_json), {
+    externalId: "apple-show",
+    title: "Apple 私有节目",
+    author: ""
+  });
   db.close();
 });
 

@@ -7,6 +7,7 @@ import {
   openSync,
   readdirSync
 } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -85,6 +86,7 @@ export class PodcastDatabase {
       );
       CREATE TABLE IF NOT EXISTS episodes (
         id TEXT PRIMARY KEY,
+        public_id TEXT,
         platform TEXT NOT NULL,
         external_id TEXT NOT NULL,
         podcast_id TEXT NOT NULL REFERENCES podcasts(id),
@@ -152,6 +154,7 @@ export class PodcastDatabase {
         episode_id TEXT PRIMARY KEY REFERENCES episodes(id),
         platform TEXT NOT NULL,
         is_completed INTEGER NOT NULL DEFAULT 0,
+        automatic_summary_eligible INTEGER NOT NULL DEFAULT 0,
         completed_at TEXT,
         observed_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
@@ -198,6 +201,28 @@ export class PodcastDatabase {
     }
     const jobColumns = new Set(this.db.prepare(`PRAGMA table_info(summary_jobs)`).all().map((column) => column.name));
     if (!jobColumns.has("origin")) this.db.exec(`ALTER TABLE summary_jobs ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual'`);
+    const episodeColumns = new Set(this.db.prepare(`PRAGMA table_info(episodes)`).all().map((column) => column.name));
+    if (!episodeColumns.has("public_id")) this.db.exec(`ALTER TABLE episodes ADD COLUMN public_id TEXT`);
+    const missingPublicIds = this.db.prepare(`SELECT id FROM episodes WHERE public_id IS NULL OR public_id=''`).all();
+    const assignPublicId = this.db.prepare(`UPDATE episodes SET public_id=? WHERE id=?`);
+    for (const row of missingPublicIds) assignPublicId.run(`ep_${randomUUID()}`, row.id);
+    this.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_episodes_public_id ON episodes(public_id)`);
+    const completionColumns = new Set(this.db.prepare(`PRAGMA table_info(episode_completion_state)`).all().map((column) => column.name));
+    if (!completionColumns.has("automatic_summary_eligible")) {
+      this.db.exec(`ALTER TABLE episode_completion_state ADD COLUMN automatic_summary_eligible INTEGER NOT NULL DEFAULT 0`);
+      this.db.exec(`UPDATE episode_completion_state SET automatic_summary_eligible=is_completed`);
+    }
+    // Older Apple connector versions retained feed/enclosure URLs and raw
+    // metadata. Private podcast URLs can contain bearer credentials, so scrub
+    // them eagerly instead of waiting for each episode to be synchronized.
+    this.db.exec(`
+      UPDATE episodes
+      SET audio_url=NULL, image_url=NULL, metadata_json='{"source":"mac-podcasts-library"}'
+      WHERE platform='apple-podcasts';
+      UPDATE podcasts
+      SET image_url=NULL, metadata_json='{}'
+      WHERE platform='apple-podcasts';
+    `);
     this.db.prepare(`
       UPDATE summary_jobs SET status='failed', error='服务重启后任务已停止', updated_at=?
       WHERE status IN ('queued', 'running')
@@ -282,21 +307,23 @@ export class PodcastDatabase {
       ON CONFLICT(id) DO UPDATE SET
         title=CASE WHEN TRIM(excluded.title)='' THEN podcasts.title ELSE excluded.title END,
         author=CASE WHEN TRIM(COALESCE(excluded.author,''))='' THEN podcasts.author ELSE excluded.author END,
-        image_url=COALESCE(excluded.image_url, podcasts.image_url), metadata_json=excluded.metadata_json
+        image_url=CASE WHEN excluded.platform='apple-podcasts' THEN NULL ELSE COALESCE(excluded.image_url, podcasts.image_url) END,
+        metadata_json=excluded.metadata_json
     `).run(podcastId, episode.platform, episode.podcast.externalId, episode.podcast.title,
       episode.podcast.author ?? null, episode.imageUrl ?? null, Number(isDemo), json(episode.podcast));
     this.db.prepare(`
-      INSERT INTO episodes(id, platform, external_id, podcast_id, title, duration_seconds, published_at,
+      INSERT INTO episodes(id, public_id, platform, external_id, podcast_id, title, duration_seconds, published_at,
         description, audio_url, image_url, topic, is_demo, metadata_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         title=CASE WHEN TRIM(excluded.title)='' THEN episodes.title ELSE excluded.title END,
         duration_seconds=CASE WHEN excluded.duration_seconds>0 THEN excluded.duration_seconds ELSE episodes.duration_seconds END,
         published_at=COALESCE(excluded.published_at, episodes.published_at),
         description=CASE WHEN TRIM(COALESCE(excluded.description,''))='' THEN episodes.description ELSE excluded.description END,
-        audio_url=COALESCE(excluded.audio_url, episodes.audio_url), image_url=COALESCE(excluded.image_url, episodes.image_url),
+        audio_url=CASE WHEN excluded.platform='apple-podcasts' THEN NULL ELSE COALESCE(excluded.audio_url, episodes.audio_url) END,
+        image_url=CASE WHEN excluded.platform='apple-podcasts' THEN NULL ELSE COALESCE(excluded.image_url, episodes.image_url) END,
         topic=excluded.topic, metadata_json=excluded.metadata_json
-    `).run(episodeId, episode.platform, episode.externalId, podcastId, episode.title,
+    `).run(episodeId, `ep_${randomUUID()}`, episode.platform, episode.externalId, podcastId, episode.title,
       episode.durationSeconds, episode.publishedAt ?? null, episode.description ?? "", episode.audioUrl ?? null,
       episode.imageUrl ?? null, episode.topic, Number(isDemo), json(episode.raw));
     return episodeId;
@@ -419,25 +446,30 @@ export class PodcastDatabase {
     completed,
     observedAt,
     enabledAt,
-    automaticSummaryEligible = true
+    automaticSummaryEligible = true,
+    queueEnabled = true
   }) {
     if (!episodeId || !observedAt || Number.isNaN(Date.parse(observedAt))) return { queued: false, transition: false };
     const previous = this.db.prepare(`SELECT * FROM episode_completion_state WHERE episode_id=?`).get(episodeId) || null;
     if (previous && observedAt < previous.observed_at) return { queued: false, transition: false };
     const isCompleted = Boolean(completed);
     const transition = isCompleted && !Boolean(previous?.is_completed);
+    const eligible = isCompleted && Boolean(automaticSummaryEligible);
+    const eligibleTransition = eligible && !Boolean(previous?.automatic_summary_eligible);
     const stamp = now();
     this.db.prepare(`
-      INSERT INTO episode_completion_state(episode_id, platform, is_completed, completed_at, observed_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO episode_completion_state(
+        episode_id, platform, is_completed, automatic_summary_eligible, completed_at, observed_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(episode_id) DO UPDATE SET
         platform=excluded.platform, is_completed=excluded.is_completed,
+        automatic_summary_eligible=excluded.automatic_summary_eligible,
         completed_at=CASE WHEN excluded.is_completed=1 THEN excluded.completed_at ELSE episode_completion_state.completed_at END,
         observed_at=excluded.observed_at, updated_at=excluded.updated_at
-    `).run(episodeId, platform, Number(isCompleted), isCompleted ? observedAt : null, observedAt, stamp);
+    `).run(episodeId, platform, Number(isCompleted), Number(eligible), isCompleted ? observedAt : null, observedAt, stamp);
 
     const afterEnablement = enabledAt && !Number.isNaN(Date.parse(enabledAt)) && observedAt > enabledAt;
-    if (!transition || !afterEnablement || !automaticSummaryEligible) {
+    if (!queueEnabled || !eligibleTransition || !afterEnablement) {
       return { queued: false, transition };
     }
     const episode = this.db.prepare(`SELECT is_demo FROM episodes WHERE id=?`).get(episodeId);
@@ -487,8 +519,9 @@ export class PodcastDatabase {
     `).all();
     const counts = Object.fromEntries(rows.map((row) => [row.status, Number(row.count)]));
     const last = this.db.prepare(`
-      SELECT episode_id, platform, completed_at, status, last_error, updated_at
-      FROM auto_summary_queue ORDER BY updated_at DESC LIMIT 1
+      SELECT e.public_id AS episode_id, q.platform, q.completed_at, q.status, q.last_error, q.updated_at
+      FROM auto_summary_queue q JOIN episodes e ON e.id=q.episode_id
+      ORDER BY q.updated_at DESC LIMIT 1
     `).get() || null;
     return {
       pending: counts.pending || 0,
@@ -536,6 +569,10 @@ export class PodcastDatabase {
     return result;
   }
 
+  episodeInternalId(publicId) {
+    return this.db.prepare(`SELECT id FROM episodes WHERE public_id=?`).get(publicId)?.id || null;
+  }
+
   listEpisodes({ query = "", topic = "", platform = "", summarizedOnly = false, limit = 50, offset = 0 } = {}) {
     const conditions = [];
     const parameters = [];
@@ -553,7 +590,7 @@ export class PodcastDatabase {
         SELECT s.*, ROW_NUMBER() OVER (PARTITION BY s.episode_id ORDER BY s.observed_at DESC, s.id DESC) AS sample_rank
         FROM playback_samples s
       )
-      SELECT e.id, e.title, e.platform, e.topic, e.duration_seconds, e.published_at,
+      SELECT e.public_id AS id, e.title, e.platform, e.topic, e.duration_seconds, e.published_at,
         p.title AS podcast_title, s.progress_seconds, s.observed_at,
         COALESCE(cs.is_completed, 0) AS is_completed,
         sm.summary, sm.key_points_json, sm.category AS ai_category, sm.outline_json,
@@ -637,7 +674,7 @@ export class PodcastDatabase {
           ROW_NUMBER() OVER (PARTITION BY s.episode_id ORDER BY s.observed_at DESC, s.id DESC) AS sample_rank
         FROM playback_samples s
       )
-      SELECT e.id, e.title, e.platform, e.topic, e.duration_seconds, e.published_at, p.title AS podcast_title,
+      SELECT e.public_id AS id, e.title, e.platform, e.topic, e.duration_seconds, e.published_at, p.title AS podcast_title,
         s.progress_seconds, s.observed_at, COALESCE(cs.is_completed, 0) AS is_completed,
         sm.summary, sm.key_points_json, sm.category AS ai_category
       FROM ranked_samples s

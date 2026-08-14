@@ -1,5 +1,6 @@
 #!/bin/zsh
 set -euo pipefail
+umask 077
 
 SCRIPT_DIR="${0:A:h}"
 PROJECT_DIR="${SCRIPT_DIR:h}"
@@ -16,8 +17,20 @@ RELEASE_ID="$(date '+%Y%m%d-%H%M%S')"
 RELEASE_DIR="${RUNTIME_ROOT}/releases/${RELEASE_ID}"
 SOURCE_DB="${PROJECT_DIR}/.data/podcast-memory.sqlite"
 INSTALLED_DB="${DATA_DIR}/podcast-memory.sqlite"
-PODCAST_CODEX_BIN_PATH="${PODCAST_MEMORY_CODEX_BIN:-/Applications/ChatGPT.app/Contents/Resources/codex}"
-CODEX_READY=0
+ENABLE_AI_SUMMARY_VALUE="${ENABLE_AI_SUMMARY:-0}"
+AUTO_SUMMARY_ENABLED_VALUE="${AUTO_SUMMARY_ENABLED:-0}"
+ENABLE_API_TRANSCRIPTION_VALUE="${ENABLE_API_TRANSCRIPTION:-0}"
+ALLOW_PROTECTED_AUDIO_TRANSCRIPTION_VALUE="${ALLOW_PROTECTED_AUDIO_TRANSCRIPTION:-0}"
+for FEATURE_FLAG_VALUE in \
+  "${ENABLE_AI_SUMMARY_VALUE}" \
+  "${AUTO_SUMMARY_ENABLED_VALUE}" \
+  "${ENABLE_API_TRANSCRIPTION_VALUE}" \
+  "${ALLOW_PROTECTED_AUDIO_TRANSCRIPTION_VALUE}"; do
+  if [[ "${FEATURE_FLAG_VALUE}" != "0" && "${FEATURE_FLAG_VALUE}" != "1" ]]; then
+    print -u2 "AI 与转写开关只接受 0 或 1；已停止安装。"
+    exit 6
+  fi
+done
 PUBLIC_ORIGIN_FILE="${APP_SUPPORT_DIR}/public-origin"
 PUBLIC_ORIGIN=""
 [[ -f "${PUBLIC_ORIGIN_FILE}" ]] && PUBLIC_ORIGIN="$(<"${PUBLIC_ORIGIN_FILE}")"
@@ -33,13 +46,6 @@ if [[ -z "${NODE_BIN}" || ! -x "${NODE_BIN}" ]]; then
   print -u2 "没有找到可执行的 Node.js，请先安装 Node 22.13 或更新版本。"
   exit 1
 fi
-if [[ -x "${PODCAST_CODEX_BIN_PATH}" ]] && \
-  "${PODCAST_CODEX_BIN_PATH}" login status 2>&1 | /usr/bin/grep -qi "Logged in using ChatGPT"; then
-  CODEX_READY=1
-else
-  print -u2 "提醒：尚未检测到 ChatGPT 方式的 Codex 登录；同步仍会运行，但自动快速回顾会等待登录。"
-fi
-
 launchctl bootout "${DOMAIN}/${LABEL}" 2>/dev/null || true
 LISTENING_PIDS="$(/usr/sbin/lsof -tiTCP:8787 -sTCP:LISTEN 2>/dev/null || true)"
 if [[ -n "${LISTENING_PIDS}" ]]; then
@@ -85,6 +91,22 @@ done
 TEMP_PLIST="$(mktemp "${TMPDIR:-/tmp}/podcast-memory-launchagent.XXXXXX")"
 trap 'rm -f "${TEMP_PLIST}"' EXIT
 
+xml_escape() {
+  print -r -- "$1" | /usr/bin/sed \
+    -e 's/&/\&amp;/g' \
+    -e 's/</\&lt;/g' \
+    -e 's/>/\&gt;/g' \
+    -e 's/"/\&quot;/g' \
+    -e "s/'/\&apos;/g"
+}
+XML_NODE_BIN="$(xml_escape "${NODE_BIN}")"
+XML_RELEASE_DIR="$(xml_escape "${RELEASE_DIR}")"
+XML_PUBLIC_ORIGIN="$(xml_escape "${PUBLIC_ORIGIN}")"
+XML_TAILSCALE_LOGIN="$(xml_escape "${TAILSCALE_LOGIN}")"
+XML_DATA_DIR="$(xml_escape "${DATA_DIR}")"
+XML_APPLE_DB_PATH="$(xml_escape "${HOME}/Library/Group Containers/243LU875E5.groups.com.apple.podcasts/Documents/MTLibrary.sqlite")"
+XML_LOG_DIR="$(xml_escape "${LOG_DIR}")"
+
 cat > "${TEMP_PLIST}" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -94,11 +116,11 @@ cat > "${TEMP_PLIST}" <<PLIST
   <string>${LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${NODE_BIN}</string>
-    <string>${RELEASE_DIR}/src/server.js</string>
+    <string>${XML_NODE_BIN}</string>
+    <string>${XML_RELEASE_DIR}/src/server.js</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>${RELEASE_DIR}</string>
+  <string>${XML_RELEASE_DIR}</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
@@ -112,23 +134,25 @@ cat > "${TEMP_PLIST}" <<PLIST
     <key>PODCAST_MEMORY_TRUST_PROXY</key>
     <string>1</string>
     <key>PODCAST_MEMORY_PUBLIC_ORIGIN</key>
-    <string>${PUBLIC_ORIGIN}</string>
+    <string>${XML_PUBLIC_ORIGIN}</string>
     <key>PODCAST_MEMORY_EXTENSION_ORIGIN</key>
     <string>chrome-extension://jkdldllomdgfgheailkjdihphlmegfnc</string>
     <key>PODCAST_MEMORY_TAILSCALE_LOGIN</key>
-    <string>${TAILSCALE_LOGIN}</string>
+    <string>${XML_TAILSCALE_LOGIN}</string>
     <key>PODCAST_MEMORY_DATA</key>
-    <string>${DATA_DIR}</string>
+    <string>${XML_DATA_DIR}</string>
     <key>APPLE_PODCASTS_DB_PATH</key>
-    <string>${HOME}/Library/Group Containers/243LU875E5.groups.com.apple.podcasts/Documents/MTLibrary.sqlite</string>
+    <string>${XML_APPLE_DB_PATH}</string>
     <key>APPLE_PODCASTS_READ_TIMEOUT_MS</key>
     <string>5000</string>
-    <key>PODCAST_MEMORY_CODEX_BIN</key>
-    <string>${PODCAST_CODEX_BIN_PATH}</string>
-    <key>CODEX_SUMMARY_MODEL</key>
-    <string>gpt-5.6-terra</string>
+    <key>ENABLE_AI_SUMMARY</key>
+    <string>${ENABLE_AI_SUMMARY_VALUE}</string>
     <key>AUTO_SUMMARY_ENABLED</key>
-    <string>1</string>
+    <string>${AUTO_SUMMARY_ENABLED_VALUE}</string>
+    <key>ENABLE_API_TRANSCRIPTION</key>
+    <string>${ENABLE_API_TRANSCRIPTION_VALUE}</string>
+    <key>ALLOW_PROTECTED_AUDIO_TRANSCRIPTION</key>
+    <string>${ALLOW_PROTECTED_AUDIO_TRANSCRIPTION_VALUE}</string>
   </dict>
   <key>Umask</key>
   <integer>63</integer>
@@ -145,9 +169,9 @@ cat > "${TEMP_PLIST}" <<PLIST
   <key>LimitLoadToSessionType</key>
   <string>Aqua</string>
   <key>StandardOutPath</key>
-  <string>${LOG_DIR}/server.log</string>
+  <string>${XML_LOG_DIR}/server.log</string>
   <key>StandardErrorPath</key>
-  <string>${LOG_DIR}/server-error.log</string>
+  <string>${XML_LOG_DIR}/server-error.log</string>
 </dict>
 </plist>
 PLIST
@@ -161,11 +185,15 @@ launchctl kickstart -k "${DOMAIN}/${LABEL}"
 for attempt in {1..20}; do
   SERVICE_INFO="$(launchctl print "${DOMAIN}/${LABEL}" 2>/dev/null || true)"
   if [[ "${SERVICE_INFO}" == *"state = running"* && "${SERVICE_INFO}" == *"${RELEASE_DIR}/src/server.js"* ]] && \
-    /usr/bin/curl --silent --fail --max-time 2 "http://127.0.0.1:8787/api/automation" >/dev/null; then
+    /usr/bin/curl --silent --fail --max-time 2 "http://127.0.0.1:8787/api/health" >/dev/null; then
     print "回声后台服务已安装并启动。"
     print "本机地址：http://127.0.0.1:8787"
     print "自动同步：每 10 分钟；登录后自动启动；异常退出后自动重启。"
-    [[ "${CODEX_READY}" == "1" ]] && print "自动快速回顾：已连接 ChatGPT 订阅；听完后自动排队。"
+    print "AI 快速回顾：默认关闭；只有显式设置 ENABLE_AI_SUMMARY=1 才会使用 OpenAI Platform API。"
+    if [[ -f "${DATA_DIR}/local-access-token" ]]; then
+      LOCAL_ACCESS_TOKEN="$(<"${DATA_DIR}/local-access-token")"
+      print "本机私密地址：http://127.0.0.1:8787/#access=${LOCAL_ACCESS_TOKEN}"
+    fi
     print "运行资料：${APP_SUPPORT_DIR}"
     exit 0
   fi

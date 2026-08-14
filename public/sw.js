@@ -12,12 +12,12 @@
     return;
   }
 
-  const CACHE_NAME = "echo-shell-v6";
+  const CACHE_NAME = "echo-shell-v7";
   const SHELL_FILES = [
     "/",
     "/index.html",
-    "/styles.css?v=6",
-    "/app.js?v=6",
+    "/styles.css?v=7",
+    "/app.js?v=7",
     "/manifest.webmanifest",
     "/icons/echo.svg",
     "/icons/echo-180.png",

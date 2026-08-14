@@ -21,7 +21,9 @@ let localSetupAvailable = false;
 
 const DASHBOARD_CACHE_KEY = "echo:last-dashboard";
 const MEMORY_CACHE_KEY = "echo:last-memory";
+const OFFLINE_CACHE_ENABLED_KEY = "echo:offline-cache-enabled";
 const INSTALL_DISMISS_KEY = "echo:install-dismissed-at";
+const OFFLINE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const isStandalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
@@ -37,12 +39,48 @@ const escapeHtml = (value = "") => String(value).replace(/[&<>'"]/g, (char) => (
 }[char]));
 
 const readLocalCache = (key) => {
-  try { return JSON.parse(localStorage.getItem(key) || "null"); } catch { return null; }
+  try {
+    if (localStorage.getItem(OFFLINE_CACHE_ENABLED_KEY) !== "1") {
+      localStorage.removeItem(key);
+      return null;
+    }
+    const envelope = JSON.parse(localStorage.getItem(key) || "null");
+    if (!envelope || !Number.isFinite(envelope.savedAt) || Date.now() - envelope.savedAt > OFFLINE_CACHE_TTL_MS) {
+      localStorage.removeItem(key);
+      return null;
+    }
+    return envelope.value;
+  } catch { return null; }
 };
 
 const writeLocalCache = (key, value) => {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  try {
+    if (localStorage.getItem(OFFLINE_CACHE_ENABLED_KEY) !== "1") return;
+    localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), value }));
+  } catch {}
 };
+
+const clearOfflineCache = () => {
+  try {
+    localStorage.removeItem(DASHBOARD_CACHE_KEY);
+    localStorage.removeItem(MEMORY_CACHE_KEY);
+  } catch {}
+};
+
+async function bootstrapLocalSession() {
+  const accessToken = new URLSearchParams(window.location.hash.slice(1)).get("access");
+  if (!accessToken) return;
+  const response = await fetch("/api/local-session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessToken })
+  });
+  history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || "本机私密链接验证失败");
+  }
+}
 
 async function api(path, options = {}) {
   let response;
@@ -365,14 +403,14 @@ async function loadAIStatus({ force = false } = {}) {
   }
   status.classList.toggle("configured", aiInfo.configured);
   status.textContent = aiInfo.configured
-    ? "ChatGPT 订阅已连接 · 听完自动回顾"
-    : "ChatGPT/Codex 尚未连接 · 浏览不受影响";
-  $("#configureAI").textContent = "查看自动回顾";
+    ? "OpenAI API 已连接 · 按量计费"
+    : "AI 默认关闭 · 浏览不受影响";
+  $("#configureAI").textContent = "查看可选 AI";
   const modalStatus = $("#aiModalStatus");
   if (modalStatus) {
     modalStatus.textContent = aiInfo.configured
-      ? `已连接：${aiInfo.summaryModel}。自动快速回顾正在运行。`
-      : `${aiInfo.message || "尚未连接"}。请在 Mac 的终端运行 codex login，并选择 ChatGPT 登录。`;
+      ? `已连接：${aiInfo.summaryModel}。${aiInfo.automaticSummary?.enabled ? "自动回顾已开启。" : "自动回顾未开启。"}`
+      : (aiInfo.message || "AI 快速回顾尚未启用");
   }
   return aiInfo;
 }
@@ -427,7 +465,7 @@ function renderEpisodeDetail(episode) {
     : 0;
   const summarySource = sourceLabel(episode.summary_source_kind);
   const activeJob = episode.job && ["queued", "running"].includes(episode.job.status) ? episode.job : null;
-  const hasAudio = Boolean(episode.audio_url || episode.platform === "gcores");
+  const hasAudio = Boolean(episode.has_audio);
   const summaryMarkup = episode.summary ? `
     <span class="summary-source ${summarySource.className}">${summarySource.text}</span>
     <p class="detail-summary">${escapeHtml(episode.summary)}</p>
@@ -491,16 +529,23 @@ async function startSummary(mode) {
   if (!currentEpisodeId) return;
   if (!aiInfo.configured) {
     openAISettings();
-    toast("请先在 Mac 上使用 ChatGPT 登录 Codex");
+    toast(aiInfo.message || "请先明确启用 OpenAI Platform API");
     return;
   }
   const buttons = $$("[data-summary-mode]");
+  let cloudAudioConfirmed = false;
+  if (mode === "deep") {
+    cloudAudioConfirmed = window.confirm(
+      "深度总结会把整期音频分段上传到 OpenAI Platform API，可能产生费用；机核内容还可能受会员或版权限制。请只处理你有权上传的内容。是否继续？"
+    );
+    if (!cloudAudioConfirmed) return;
+  }
   buttons.forEach((button) => { button.disabled = true; });
   try {
     const result = await api(`/api/summarize/${encodeURIComponent(currentEpisodeId)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode })
+      body: JSON.stringify({ mode, cloudAudioConfirmed })
     });
     renderEpisodeDetail({ ...currentEpisode, job: result.job });
     pollSummaryJob(result.job.id);
@@ -614,18 +659,37 @@ $("#episodeDetail").addEventListener("click", (event) => {
 });
 
 $("#configureAI").addEventListener("click", openAISettings);
+$("#saveAIKey").addEventListener("click", async () => {
+  const button = $("#saveAIKey");
+  const apiKey = $("#openaiApiKey").value.trim();
+  button.disabled = true;
+  try {
+    aiInfo = await api("/api/ai/configure", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey })
+    });
+    $("#openaiApiKey").value = "";
+    await loadAIStatus({ force: true });
+    toast(aiInfo.configured ? "OpenAI API 已连接；调用会按量计费" : aiInfo.message);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+});
 $("#checkAIConnection").addEventListener("click", async () => {
   const button = $("#checkAIConnection");
   button.disabled = true;
   button.textContent = "正在检查";
   try {
     await loadAIStatus({ force: true });
-    toast(aiInfo.configured ? "ChatGPT 订阅连接正常" : aiInfo.message || "Codex 尚未登录");
+    toast(aiInfo.configured ? "OpenAI Platform API 设置可用（按量计费）" : aiInfo.message || "AI 尚未启用");
   } catch (error) {
     toast(error.message);
   } finally {
     button.disabled = false;
-    button.textContent = "重新检查 ChatGPT 登录";
+    button.textContent = "重新检查 API 设置";
   }
 });
 
@@ -640,6 +704,23 @@ for (const selector of ["#memoryPlatform", "#memoryTopic", "#summarizedOnly"]) {
 $("#dismissInstall").addEventListener("click", () => {
   try { localStorage.setItem(INSTALL_DISMISS_KEY, String(Date.now())); } catch {}
   $("#installCard").hidden = true;
+});
+
+const offlineCacheToggle = $("#offlineCacheToggle");
+try { offlineCacheToggle.checked = localStorage.getItem(OFFLINE_CACHE_ENABLED_KEY) === "1"; } catch {}
+offlineCacheToggle.addEventListener("change", () => {
+  try {
+    if (offlineCacheToggle.checked) localStorage.setItem(OFFLINE_CACHE_ENABLED_KEY, "1");
+    else localStorage.removeItem(OFFLINE_CACHE_ENABLED_KEY);
+  } catch {}
+  if (!offlineCacheToggle.checked) clearOfflineCache();
+  toast(offlineCacheToggle.checked ? "已开启离线保存；仅读取 24 小时内的缓存" : "已关闭并清除离线资料");
+});
+$("#clearOfflineCache").addEventListener("click", () => {
+  clearOfflineCache();
+  try { localStorage.removeItem(OFFLINE_CACHE_ENABLED_KEY); } catch {}
+  offlineCacheToggle.checked = false;
+  toast("此设备上的离线资料已清除，离线保存也已关闭");
 });
 
 document.addEventListener("keydown", (event) => {
@@ -661,16 +742,18 @@ window.addEventListener("pageshow", (event) => {
   if (event.persisted) void refreshVisibleData({ quiet: true });
 });
 
-setupInstallExperience();
-hydrateFromLocalCache();
+async function startApplication() {
+  try { await bootstrapLocalSession(); } catch (error) { toast(error.message); }
+  setupInstallExperience();
+  hydrateFromLocalCache();
 
-Promise.allSettled([
-  api("/api/setup"),
-  loadDashboard(),
-  loadMemory(),
-  loadAIStatus(),
-  loadAutomationStatus()
-]).then((results) => {
+  const results = await Promise.allSettled([
+    api("/api/setup"),
+    loadDashboard(),
+    loadMemory(),
+    loadAIStatus(),
+    loadAutomationStatus()
+  ]);
   const setupResult = results[0];
   if (setupResult.status === "fulfilled") {
     setupInfo = setupResult.value;
@@ -689,7 +772,9 @@ Promise.allSettled([
     setAutomationStatus(hasCache ? "Mac 离线 · 显示上次数据" : "Mac 暂时离线", "offline");
     if (!hasCache) toast(failure.reason?.message || "暂时无法读取数据");
   }
-});
+}
+
+void startApplication();
 
 backgroundRefreshTimer = setInterval(() => {
   if (document.visibilityState === "visible") void refreshVisibleData({ quiet: true });

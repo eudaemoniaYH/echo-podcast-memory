@@ -5,11 +5,16 @@ import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { KeychainCredentialStore } from "./credentials.js";
 import { AIService } from "./ai.js";
+import { serializeEpisodeDetail, serializeSummaryJob } from "./api-serialization.js";
 import { GcoresClient } from "./connectors/gcores.js";
 import { PodcastDatabase } from "./db.js";
 import { seedDemo } from "./demo.js";
 import { SyncService } from "./sync.js";
-import { createPairingManager, createRequestAccessPolicy } from "./http-security.js";
+import {
+  createLocalSessionManager,
+  createPairingManager,
+  createRequestAccessPolicy
+} from "./http-security.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = process.env.PODCAST_MEMORY_DATA || join(root, ".data");
@@ -17,7 +22,8 @@ const port = Number(process.env.PORT || 8787);
 const syncIntervalMinutes = Math.min(Math.max(Number(process.env.SYNC_INTERVAL_MINUTES || 10), 2), 120);
 const syncIntervalMs = syncIntervalMinutes * 60 * 1000;
 const showcaseMode = process.env.PODCAST_MEMORY_SHOWCASE === "1";
-const automaticSummariesEnabled = !showcaseMode && process.env.AUTO_SUMMARY_ENABLED !== "0";
+const automaticSummariesEnabled = !showcaseMode && process.env.AUTO_SUMMARY_ENABLED === "1";
+const protectedAudioTranscriptionEnabled = process.env.ALLOW_PROTECTED_AUDIO_TRANSCRIPTION === "1";
 const accessPolicy = createRequestAccessPolicy({
   port,
   publicOrigin: process.env.PODCAST_MEMORY_PUBLIC_ORIGIN || "",
@@ -26,12 +32,16 @@ const accessPolicy = createRequestAccessPolicy({
   extensionOrigin: process.env.PODCAST_MEMORY_EXTENSION_ORIGIN
 });
 
-const db = new PodcastDatabase(join(dataDir, "podcast-memory.sqlite"));
+const db = new PodcastDatabase(showcaseMode ? ":memory:" : join(dataDir, "podcast-memory.sqlite"));
 if (automaticSummariesEnabled && !db.getMeta("auto_summary_enabled_at")) {
   db.setMeta("auto_summary_enabled_at", new Date().toISOString());
 }
 const credentialStore = new KeychainCredentialStore();
-const syncService = new SyncService({ db, credentials: credentialStore });
+const syncService = new SyncService({
+  db,
+  credentials: credentialStore,
+  automaticSummariesEnabled
+});
 const aiService = new AIService({ credentials: credentialStore });
 const runningSummaryJobs = new Map();
 const runningSummaryTasks = new Set();
@@ -61,15 +71,16 @@ let syncCyclePromise = null;
 const platformSyncPromises = new Map();
 seedDemo(db);
 const pairingManager = showcaseMode ? null : createPairingManager({ dataDir });
+const localSessionManager = showcaseMode ? null : createLocalSessionManager({ dataDir });
 
-const sendJson = (response, status, payload, origin = null) => {
+const sendJson = (response, status, payload, origin = null, extraHeaders = {}) => {
   const headers = {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
     "x-content-type-options": "nosniff"
   };
   if (accessPolicy.isExtensionOrigin(origin)) headers["access-control-allow-origin"] = origin;
-  response.writeHead(status, headers);
+  response.writeHead(status, { ...headers, ...extraHeaders });
   response.end(JSON.stringify(payload));
 };
 
@@ -151,7 +162,7 @@ const runSummaryJob = async (jobId, episodeId, mode) => {
     let sourceKind = "shownotes";
     if (mode === "deep") {
       if (!(await aiService.status()).transcriptionConfigured) {
-        throw new Error("整期音频转写没有启用；快速回顾已可通过 ChatGPT 订阅使用");
+        throw new Error("整期音频转写没有启用；可以先依据节目文字生成快速回顾");
       }
       let transcript = db.transcript(episodeId);
       if (!transcript) {
@@ -160,6 +171,9 @@ const runSummaryJob = async (jobId, episodeId, mode) => {
         const needsProtectedAudio = episode.platform === "gcores" &&
           (episodeMetadata.mediaType === "protected_audio" || !episode.audio_url);
         if (needsProtectedAudio) {
+          if (!protectedAudioTranscriptionEnabled) {
+            throw new Error("受保护音频默认不允许上传；请改用节目简介生成快速回顾");
+          }
           const gcoresCredentials = await credentialStore.get("gcores");
           if (!gcoresCredentials) throw new Error("请重新连接机核账号后再读取这期音频");
           const gcores = new GcoresClient({ credentials: gcoresCredentials });
@@ -286,7 +300,6 @@ const handleConnect = async (platform, request, response, origin) => {
   try {
     await credentialStore.set(platform, credentials);
     const result = await syncPlatform(platform, "connect");
-    pairingManager.rotate();
     db.clearDemo();
     void scheduleOneAutomaticSummary();
     sendJson(response, 200, { ok: true, importedCount: result.importedCount }, origin);
@@ -325,6 +338,9 @@ const server = createServer(async (request, response) => {
     const access = accessPolicy.classify(request);
     if (!access.allowed) return sendJson(response, 421, { error: "Untrusted request host" });
     const url = new URL(request.url, access.origin);
+    if (request.method === "GET" && url.pathname === "/api/health") {
+      return sendJson(response, 200, { ok: true, showcaseMode });
+    }
     if (request.method === "OPTIONS") {
       if (!accessPolicy.isLocal(access) || !accessPolicy.isExtensionOrigin(origin)) {
         return sendJson(response, 403, { error: "Forbidden" });
@@ -339,6 +355,21 @@ const server = createServer(async (request, response) => {
     }
     if (showcaseMode && request.method !== "GET" && request.method !== "HEAD") {
       return sendJson(response, 403, { error: "只读展示模式不接受修改请求" });
+    }
+    if (request.method === "POST" && url.pathname === "/api/local-session") {
+      if (showcaseMode || !accessPolicy.isLocal(access) || !accessPolicy.trustedPageOrigin(origin, access)) {
+        return sendJson(response, 403, { error: "本机访问验证失败" });
+      }
+      const body = await readBody(request);
+      const cookie = localSessionManager.bootstrap(body.accessToken);
+      return cookie
+        ? sendJson(response, 200, { ok: true }, null, { "set-cookie": cookie })
+        : sendJson(response, 403, { error: "本机访问链接无效，请从终端重新打开" });
+    }
+    const extensionConnect = request.method === "POST" && url.pathname.startsWith("/api/connect/");
+    if (!showcaseMode && url.pathname.startsWith("/api/") && !extensionConnect &&
+        !localSessionManager.authorize(request, access)) {
+      return sendJson(response, 401, { error: "请从安装终端显示的本机私密链接打开回声" });
     }
     if (request.method === "GET" && url.pathname === "/api/dashboard") {
       return sendJson(response, 200, { ...db.dashboard(), showcaseMode });
@@ -368,9 +399,12 @@ const server = createServer(async (request, response) => {
       });
     }
     if (request.method === "GET" && url.pathname.startsWith("/api/episodes/")) {
-      const id = decodeURIComponent(url.pathname.slice("/api/episodes/".length));
-      const episode = db.episodeDetail(id);
-      return episode ? sendJson(response, 200, { episode }) : sendJson(response, 404, { error: "没有找到这期节目" });
+      const publicId = decodeURIComponent(url.pathname.slice("/api/episodes/".length));
+      const internalId = db.episodeInternalId(publicId);
+      const episode = internalId ? db.episodeDetail(internalId) : null;
+      return episode
+        ? sendJson(response, 200, { episode: serializeEpisodeDetail(episode) })
+        : sendJson(response, 404, { error: "没有找到这期节目" });
     }
     if (request.method === "GET" && url.pathname === "/api/ai/status") {
       if (showcaseMode) {
@@ -398,23 +432,29 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname.startsWith("/api/summary-jobs/")) {
       const id = decodeURIComponent(url.pathname.slice("/api/summary-jobs/".length));
       const job = db.summaryJob(id);
-      return job ? sendJson(response, 200, { job }) : sendJson(response, 404, { error: "没有找到这个总结任务" });
+      return job
+        ? sendJson(response, 200, { job: serializeSummaryJob(job) })
+        : sendJson(response, 404, { error: "没有找到这个总结任务" });
     }
     if (request.method === "POST" && url.pathname.startsWith("/api/summarize/")) {
       if (!trustedMutationOrigin(origin, access)) return sendJson(response, 403, { error: "只能从受信任的回声页面生成文字回顾" });
       const aiStatus = await aiService.status();
-      if (!aiStatus.configured) return sendJson(response, 422, { error: `${aiStatus.message}；请在 Mac 上使用 ChatGPT 登录 Codex` });
-      const episodeId = decodeURIComponent(url.pathname.slice("/api/summarize/".length));
-      if (!db.episodeDetail(episodeId)) return sendJson(response, 404, { error: "没有找到这期节目" });
+      if (!aiStatus.configured) return sendJson(response, 422, { error: aiStatus.message });
+      const publicId = decodeURIComponent(url.pathname.slice("/api/summarize/".length));
+      const episodeId = db.episodeInternalId(publicId);
+      if (!episodeId || !db.episodeDetail(episodeId)) return sendJson(response, 404, { error: "没有找到这期节目" });
       const body = await readBody(request);
       const mode = body.mode === "deep" ? "deep" : "notes";
       if (mode === "deep" && !aiStatus.transcriptionConfigured) {
-        return sendJson(response, 422, { error: "整期音频转写尚未启用；快速回顾已使用 ChatGPT 订阅" });
+        return sendJson(response, 422, { error: "整期音频转写默认关闭；需要显式启用并使用 OpenAI Platform API（按量计费）" });
+      }
+      if (mode === "deep" && body.cloudAudioConfirmed !== true) {
+        return sendJson(response, 400, { error: "开始前必须明确确认整期音频将上传到 OpenAI 并可能产生 API 费用" });
       }
       const runningId = runningSummaryJobs.get(episodeId);
-      if (runningId) return sendJson(response, 202, { job: db.summaryJob(runningId) });
+      if (runningId) return sendJson(response, 202, { job: serializeSummaryJob(db.summaryJob(runningId)) });
       const job = enqueueSummaryTask({ episodeId, mode, origin: "manual" });
-      return sendJson(response, 202, { job });
+      return sendJson(response, 202, { job: serializeSummaryJob(job) });
     }
     if (request.method === "GET" && url.pathname === "/api/pairing-code") {
       if (!accessPolicy.isLocal(access) || showcaseMode) return sendJson(response, 404, { error: "Not found" });
@@ -452,6 +492,7 @@ const server = createServer(async (request, response) => {
         "content-security-policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https:; connect-src 'self'",
         "x-frame-options": "DENY",
         "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
         ...(url.pathname === "/sw.js" ? { "service-worker-allowed": "/" } : {})
       });
       return response.end(request.method === "HEAD" ? undefined : readFileSync(filePath));
@@ -469,6 +510,9 @@ let startupSync = null;
 
 server.listen(port, "127.0.0.1", () => {
   console.log(`Podcast Memory is running at http://127.0.0.1:${port}`);
+  if (localSessionManager && process.stdout.isTTY) {
+    console.log(`Private local dashboard: ${localSessionManager.localUrl(port)}`);
+  }
   console.log(`Automatic sync interval: ${syncIntervalMinutes} minutes`);
   console.log(`Automatic quick reviews: ${automaticSummariesEnabled ? "enabled" : "disabled"}`);
   automationState.nextSyncAt = new Date(Date.now() + 5_000).toISOString();

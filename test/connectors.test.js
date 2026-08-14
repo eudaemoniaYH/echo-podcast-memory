@@ -168,6 +168,7 @@ test("Xiaoyuzhou client uses the read-only history endpoint and session headers"
   assert.equal(result.cursor, "next");
   assert.match(calls[0].url, /episode-played\/list-history$/);
   assert.equal(calls[0].options.method, "POST");
+  assert.equal(calls[0].options.redirect, "error");
   assert.equal(calls[0].options.headers["x-jike-access-token"], "access");
 });
 
@@ -193,6 +194,7 @@ test("Gcores client reads playlist history with Token authentication", async () 
   const result = await client.getHistory();
   assert.equal(result[0].id, "42");
   assert.match(calls[0].url, /\/history$/);
+  assert.equal(calls[0].options.redirect, "error");
   assert.equal(calls[0].options.headers.authorization, "Token token=gcores-token");
 });
 

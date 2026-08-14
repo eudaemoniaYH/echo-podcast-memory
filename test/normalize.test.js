@@ -72,11 +72,15 @@ test("normalizes Apple Podcasts show notes and explicit played state", () => {
     published_at: 804_470_400,
     description: "<p>第一段 &amp; 重点</p><p>第二段</p>",
     podcast_external_id: "show-1",
-    podcast_title: "精华节目"
+    podcast_title: "精华节目",
+    audio_url: "https://private.example/audio.mp3?token=secret",
+    feed_url: "https://private.example/feed.xml?token=secret"
   });
   assert.equal(result.episode.platform, "apple-podcasts");
   assert.equal(result.episode.description, "第一段 & 重点\n\n第二段");
   assert.equal(result.episode.topic, "AI 与科技");
+  assert.equal(result.episode.audioUrl, null);
+  assert.deepEqual(result.episode.raw, { source: "mac-podcasts-library" });
   assert.equal(result.playback.completed, true);
   assert.equal(result.playback.automaticSummaryEligible, true);
   assert.equal(result.playback.observedAt, "2026-07-01T00:00:00.000Z");

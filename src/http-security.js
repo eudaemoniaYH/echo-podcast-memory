@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { chmodSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export const DEFAULT_EXTENSION_ORIGIN = "chrome-extension://jkdldllomdgfgheailkjdihphlmegfnc";
@@ -150,11 +150,59 @@ export const createPairingManager = ({
       return { ok: false, reason: failures.length >= maxFailures ? "rate-limited" : "invalid" };
     }
     failures = [];
+    rotate();
     return { ok: true };
   };
 
   rotate();
   return { consume, invalidate, rotate, snapshot };
+};
+
+const secureEqual = (expected, candidate) => {
+  const expectedDigest = createHash("sha256").update(String(expected || "")).digest();
+  const candidateDigest = createHash("sha256").update(String(candidate || "")).digest();
+  return timingSafeEqual(expectedDigest, candidateDigest);
+};
+
+const cookieValue = (header, name) => String(header || "")
+  .split(";")
+  .map((part) => part.trim())
+  .find((part) => part.startsWith(`${name}=`))
+  ?.slice(name.length + 1) || "";
+
+export const createLocalSessionManager = ({ dataDir, randomBytesFn = randomBytes }) => {
+  const tokenPath = join(dataDir, "local-access-token");
+  let accessToken = "";
+  if (existsSync(tokenPath)) {
+    const stored = readFileSync(tokenPath, "utf8").trim();
+    if (/^[a-f0-9]{64}$/i.test(stored)) accessToken = stored.toLowerCase();
+  }
+  if (!accessToken) {
+    accessToken = randomBytesFn(32).toString("hex");
+    writeFileSync(tokenPath, `${accessToken}\n`, { mode: 0o600 });
+  }
+  chmodSync(tokenPath, 0o600);
+
+  const authorize = (request, access) => {
+    if (access?.kind === "tailscale") return true;
+    if (access?.kind !== "local") return false;
+    const candidate = cookieValue(request.headers.cookie, "echo_local_session");
+    return candidate.length === 64 && secureEqual(accessToken, candidate);
+  };
+
+  const bootstrap = (candidate) => {
+    if (typeof candidate !== "string" || candidate.length !== 64 || !secureEqual(accessToken, candidate)) {
+      return null;
+    }
+    return `echo_local_session=${accessToken}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000`;
+  };
+
+  return {
+    authorize,
+    bootstrap,
+    localUrl: (port) => `http://127.0.0.1:${port}/#access=${accessToken}`,
+    tokenPath
+  };
 };
 
 export { normalizeOrigin };

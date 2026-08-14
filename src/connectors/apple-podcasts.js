@@ -106,14 +106,9 @@ export class ApplePodcastsClient {
         }
       }
 
-      const feedUrl = `COALESCE(
-        ${textValue(podcastColumns, "p", "ZUPDATEDFEEDURL")},
-        ${textValue(podcastColumns, "p", "ZFEEDURL")}
-      )`;
       const podcastExternalId = `COALESCE(
         'uuid:' || ${textValue(podcastColumns, "p", "ZUUID")},
         'store:' || ${positiveTextValue(podcastColumns, "p", "ZSTORECOLLECTIONID")},
-        'feed:' || ${feedUrl},
         'local-pk:' || CAST(p.Z_PK AS TEXT),
         'unknown'
       )`;
@@ -124,9 +119,7 @@ export class ApplePodcastsClient {
       const episodeExternalId = `COALESCE(
         'uuid:' || ${textValue(episodeColumns, "e", "ZUUID")},
         'store:' || ${positiveTextValue(episodeColumns, "e", "ZSTORETRACKID")},
-        'metadata:' || ${textValue(episodeColumns, "e", "ZMETADATAIDENTIFIER")},
         ${qualifiedGuid},
-        'enclosure:' || ${textValue(episodeColumns, "e", "ZENCLOSUREURL")},
         'local-pk:' || CAST(e.Z_PK AS TEXT)
       )`;
       const playhead = numberValue(episodeColumns, "e", "ZPLAYHEAD");
@@ -165,16 +158,6 @@ export class ApplePodcastsClient {
             ${textValue(episodeColumns, "e", "ZITEMDESCRIPTION")},
             ''
           ) AS description,
-          COALESCE(
-            ${textValue(episodeColumns, "e", "ZENCLOSUREURL")},
-            ${textValue(episodeColumns, "e", "ZFREEENCLOSUREURL")},
-            ${textValue(episodeColumns, "e", "ZASSETURL")}
-          ) AS audio_url,
-          COALESCE(
-            ${textValue(episodeColumns, "e", "ZARTWORKTEMPLATEURL")},
-            ${textValue(podcastColumns, "p", "ZIMAGEURL")},
-            ${textValue(podcastColumns, "p", "ZARTWORKTEMPLATEURL")}
-          ) AS image_url,
           ${podcastExternalId} AS podcast_external_id,
           COALESCE(${textValue(podcastColumns, "p", "ZTITLE")}, 'Apple 播客') AS podcast_title,
           COALESCE(
@@ -182,7 +165,6 @@ export class ApplePodcastsClient {
             ${textValue(episodeColumns, "e", "ZAUTHOR")},
             ''
           ) AS podcast_author,
-          ${feedUrl} AS feed_url,
           ${playhead} AS playhead,
           ${column(episodeColumns, "e", "ZLASTDATEPLAYED")} AS playback_observed_at,
           ${column(episodeColumns, "e", "ZPLAYSTATELASTMODIFIEDDATE")} AS completion_observed_at,

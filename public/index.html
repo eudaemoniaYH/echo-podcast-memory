@@ -14,7 +14,7 @@
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" href="/icons/echo.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/echo-180.png">
-    <link rel="stylesheet" href="/styles.css?v=6">
+    <link rel="stylesheet" href="/styles.css?v=7">
     <script src="/sw.js" defer></script>
   </head>
   <body>
@@ -113,7 +113,7 @@
             <div>
               <p class="eyebrow">KNOWLEDGE MEMORY</p>
               <h2>文字回顾</h2>
-              <p>听完一集后，自动依据节目简介与时间轴生成分类、摘要、要点和回看提纲；也可以随时手动重新生成。</p>
+              <p>AI 默认关闭。明确启用后，可依据节目简介与时间轴手动生成分类、摘要、要点和回看提纲；自动任务需另行选择开启。</p>
             </div>
             <div class="ai-setup">
               <span id="aiStatus" class="ai-status">正在检查 AI 设置</span>
@@ -146,8 +146,17 @@
           </div>
           <div id="episodeList" class="episode-list"></div>
         </section>
+
+        <section class="privacy-controls" aria-labelledby="offlinePrivacyTitle">
+          <div>
+            <h2 id="offlinePrivacyTitle">此设备的离线资料</h2>
+            <p>默认不保存。开启后，浏览器会保存最近统计与文字回顾；只读取 24 小时内的缓存，过期数据在下次打开时清除。</p>
+          </div>
+          <label><input id="offlineCacheToggle" type="checkbox"> 允许离线保存</label>
+          <button id="clearOfflineCache" class="secondary-button" type="button">立即清除</button>
+        </section>
       </main>
-      <footer>收听数据库留在这台 Mac · 快速回顾通过已登录的 ChatGPT/Codex 订阅生成</footer>
+      <footer>收听数据库留在这台 Mac · 可选 AI 通过 OpenAI Platform API 生成并按量计费</footer>
     </div>
     <div id="connectionModal" class="modal" hidden>
       <div class="modal-backdrop" data-close-connection></div>
@@ -211,17 +220,19 @@
       <div class="modal-backdrop" data-close-ai></div>
       <section class="ai-dialog" role="dialog" aria-modal="true" aria-labelledby="aiDialogTitle">
         <button class="modal-close" type="button" aria-label="关闭 AI 设置" data-close-ai>×</button>
-        <p class="eyebrow">CHATGPT SUBSCRIPTION</p>
-        <h2 id="aiDialogTitle">自动快速回顾</h2>
-        <p id="aiModalStatus" class="connection-intro">正在检查这台 Mac 的 ChatGPT 登录状态。</p>
-        <div class="privacy-note"><strong>触发规则</strong><br>小宇宙使用平台的“已听完”标志；机核在播放达到 98% 或距结尾不到 60 秒时视为听完；Apple 只用 Mac 同步下来的明确“已播放”状态触发，并排除单纯手动标记。每个平台第一次启用只建立基线，不会批量处理过去的历史。</div>
-        <div class="privacy-note"><strong>费用与隐私</strong><br>节目简介和时间轴会发送给 OpenAI，由这台 Mac 已登录的 Codex 使用你的 ChatGPT 订阅额度生成；不会调用按量计费的 Platform API。SQLite、平台令牌和生成结果仍留在 Mac。</div>
-        <div class="privacy-note">自动任务只生成快速回顾，不会上传或转写整期音频。Mac 需要开机、联网并保持 ChatGPT/Codex 登录。</div>
-        <div hidden aria-hidden="true"><input id="openaiApiKey" tabindex="-1"><button id="saveAIKey" type="button" tabindex="-1"></button></div>
-        <button id="checkAIConnection" class="dialog-primary" type="button">重新检查 ChatGPT 登录</button>
+        <p class="eyebrow">OPTIONAL OPENAI API</p>
+        <h2 id="aiDialogTitle">可选 AI 快速回顾</h2>
+        <p id="aiModalStatus" class="connection-intro">正在检查可选 AI 设置。</p>
+        <div class="privacy-note"><strong>默认关闭</strong><br>只有你显式设置 <code>ENABLE_AI_SUMMARY=1</code> 并配置 API Key 后，才会调用 OpenAI Platform API；自动任务还需另行设置 <code>AUTO_SUMMARY_ENABLED=1</code>。</div>
+        <div class="privacy-note"><strong>发送内容与费用</strong><br>播客名、单集名、节目简介/时间轴（最多 120,000 字符）以及你的生成操作会发送给 OpenAI。请求不提供 Shell、网页或本机文件工具，设置 <code>store:false</code>，但仍受你的 OpenAI API 数据控制与按量计费规则约束。</div>
+        <div class="privacy-note"><strong>整期音频</strong><br>深度模式需单独启用；会分段上传整期音频并可能产生费用。受保护的机核音频默认拒绝，且只应处理你有权上传的内容。</div>
+        <label class="field-label" for="openaiApiKey">OpenAI API Key（保存到 macOS 钥匙串）</label>
+        <input id="openaiApiKey" class="key-input" type="password" autocomplete="off" placeholder="sk-…">
+        <button id="saveAIKey" class="dialog-primary" type="button">保存 API Key</button>
+        <button id="checkAIConnection" class="secondary-button" type="button">重新检查 API 设置</button>
       </section>
     </div>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script type="module" src="/app.js?v=6"></script>
+    <script type="module" src="/app.js?v=7"></script>
   </body>
 </html>

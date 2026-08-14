@@ -62,7 +62,7 @@ export function normalizeXiaoyuzhouEpisode(raw) {
       author: first(podcast.author, podcast.host, "")
     },
     topic: classifyTopic(first(raw.title, ""), description),
-    raw
+    raw: { isFinished: Boolean(raw.isFinished) }
   };
 }
 
@@ -90,7 +90,7 @@ export function normalizeGcoresRadio(raw, historyItem = {}) {
       author: first(raw.category, "机核")
     },
     topic: classifyTopic(first(raw.title, ""), description),
-    raw
+    raw: { mediaType: raw.mediaType || null }
   };
 }
 
@@ -173,19 +173,15 @@ export function normalizeApplePodcastsEpisode(raw) {
       durationSeconds,
       publishedAt: normalizeAppleTimestamp(raw.published_at),
       description,
-      audioUrl: first(raw.audio_url, null),
-      imageUrl: first(raw.image_url, null),
+      audioUrl: null,
+      imageUrl: null,
       podcast: {
         externalId: String(first(raw.podcast_external_id, "unknown")),
         title: first(raw.podcast_title, "Apple 播客"),
         author: first(raw.podcast_author, "")
       },
       topic: classifyTopic(first(raw.title, ""), description),
-      raw: {
-        ...raw,
-        source: "mac-podcasts-library",
-        feedUrl: raw.feed_url || null
-      }
+      raw: { source: "mac-podcasts-library" }
     },
     playback: {
       progressSeconds,

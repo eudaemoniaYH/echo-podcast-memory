@@ -1,6 +1,8 @@
 #!/bin/zsh
 set -euo pipefail
 
+SCRIPT_DIR="${0:A:h}"
+
 find_tailscale() {
   local candidate
   for candidate in \
@@ -23,7 +25,7 @@ if [[ -z "${TAILSCALE_BIN}" ]]; then
   exit 2
 fi
 
-STATUS_JSON="$(${TAILSCALE_BIN} status --json 2>/dev/null || true)"
+STATUS_JSON="$("${TAILSCALE_BIN}" status --json 2>/dev/null || true)"
 BACKEND_STATE="$(print -r -- "${STATUS_JSON}" | plutil -extract BackendState raw -o - - 2>/dev/null || true)"
 if [[ "${BACKEND_STATE}" != "Running" ]]; then
   print -u2 "Tailscale 尚未登录或未连接。请先打开 Tailscale 完成登录，再重新运行此脚本。"
@@ -47,18 +49,20 @@ if [[ -z "${TAILSCALE_LOGIN}" ]]; then
   exit 5
 fi
 
-${TAILSCALE_BIN} serve --bg http://127.0.0.1:8787
 PRIVATE_URL="https://${DNS_NAME}/"
 ORIGIN_FILE="${HOME}/Library/Application Support/Podcast Memory/public-origin"
 LOGIN_FILE="${HOME}/Library/Application Support/Podcast Memory/tailscale-login"
 mkdir -p "${ORIGIN_FILE:h}"
+chmod 700 "${ORIGIN_FILE:h}"
 print -r -- "https://${DNS_NAME}" > "${ORIGIN_FILE}"
 print -r -- "${TAILSCALE_LOGIN}" > "${LOGIN_FILE}"
 chmod 600 "${ORIGIN_FILE}" "${LOGIN_FILE}"
 
+print "已记录唯一受信任来源；正在先安装并验证后台服务。"
+"${SCRIPT_DIR}/install-macos-agent.sh"
+"${TAILSCALE_BIN}" serve --bg http://127.0.0.1:8787
+print "后台服务验证通过，Tailscale Serve 已启用。"
 print "回声已通过 Tailscale Serve 私密发布，仅同一 tailnet 内的设备可访问。"
 print "iPhone 地址：${PRIVATE_URL}"
-print "已记录唯一受信任来源；正在重新安装后台服务以应用配置。"
-"${SCRIPT_DIR}/install-macos-agent.sh"
 print "在 iPhone Safari 打开该地址，然后选择：分享 → 添加到主屏幕 → 作为 Web App 打开。"
 print "此脚本不会启用 Funnel，也不会把回声公开到互联网。"

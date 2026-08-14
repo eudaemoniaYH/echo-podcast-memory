@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   DEFAULT_EXTENSION_ORIGIN,
+  createLocalSessionManager,
   createPairingManager,
   createRequestAccessPolicy
 } from "../src/http-security.js";
@@ -22,6 +23,36 @@ test("request policy rejects DNS rebinding hosts and untrusted forwarded headers
     "x-forwarded-proto": "https",
     "tailscale-user-login": "owner@example.com"
   })).allowed, false);
+});
+
+test("local API sessions require the private per-install token", () => {
+  const directory = mkdtempSync(join(tmpdir(), "echo-local-session-test-"));
+  try {
+    const manager = createLocalSessionManager({
+      dataDir: directory,
+      randomBytesFn: () => Buffer.alloc(32, 0xab)
+    });
+    const token = "ab".repeat(32);
+    const local = { allowed: true, kind: "local" };
+    assert.equal(statSync(manager.tokenPath).mode & 0o777, 0o600);
+    assert.equal(manager.authorize(request({ host: "127.0.0.1:8787" }), local), false);
+    assert.equal(manager.bootstrap("wrong"), null);
+    const cookie = manager.bootstrap(token);
+    assert.match(cookie, /^echo_local_session=/);
+    assert.match(cookie, /HttpOnly/);
+    assert.match(cookie, /SameSite=Strict/);
+    assert.equal(manager.authorize(request({
+      host: "127.0.0.1:8787",
+      cookie: `another=1; echo_local_session=${token}`
+    }), local), true);
+    assert.equal(manager.authorize(request({ host: "127.0.0.1:8787" }), {
+      allowed: true,
+      kind: "tailscale"
+    }), true);
+    assert.equal(manager.localUrl(8787), `http://127.0.0.1:8787/#access=${token}`);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("request policy accepts only the configured Tailscale origin and login", () => {
@@ -77,7 +108,6 @@ test("pairing codes are private, short lived, one time, and rate limited", () =>
     assert.equal(readFileSync(join(directory, "pairing-code"), "utf8"), first.pairingCode);
     assert.equal(statSync(join(directory, "pairing-code")).mode & 0o777, 0o600);
     assert.equal(manager.consume(first.pairingCode).ok, true);
-    manager.rotate();
     assert.notEqual(manager.snapshot().pairingCode, first.pairingCode);
     assert.equal(manager.consume(first.pairingCode).ok, false);
     assert.equal(manager.consume("BAD-CODE").reason, "rate-limited");

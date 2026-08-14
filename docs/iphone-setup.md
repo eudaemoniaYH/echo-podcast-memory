@@ -11,7 +11,7 @@ cd echo-podcast-memory
 ./scripts/install-macos-agent.sh
 ```
 
-安装后，回声会把一个独立运行副本与数据库放在 `~/Library/Application Support/Podcast Memory`，避免外置硬盘权限或暂时断开影响后台服务。它会在登录 Mac 时自动启动、异常退出后自动重启，并在启动后立即同步一次。
+安装后，回声会把一个独立运行副本与数据库放在 `~/Library/Application Support/Podcast Memory`，避免外置硬盘权限或暂时断开影响后台服务。它会在登录 Mac 时自动启动、异常退出后自动重启，并在启动后立即同步一次。安装脚本还会显示一个带 `#access=` 的本机私密地址：本机浏览器必须先用它换取 HttpOnly 会话 Cookie；不要分享或截图该地址。
 
 若要纳入 Apple Podcasts，还需做一次 Apple 自己的初始化：
 
@@ -35,7 +35,7 @@ cd echo-podcast-memory
 ./scripts/setup-tailscale-serve.sh
 ```
 
-脚本会显示一个 `https://...ts.net/` 地址。它只在你的 Tailscale 私网中可见，不会使用 Funnel，也不会公开到互联网。
+脚本会先安装并验证启用了身份检查的后台服务，成功后才开启 Serve 并显示一个 `https://...ts.net/` 地址。它只在你的 Tailscale 私网中可见，不会使用 Funnel，也不会公开到互联网。
 
 脚本也会把这个**唯一**的 HTTPS 来源和当前 Tailscale 登录身份写入本机私有配置，并重新安装后台服务。回声会同时核对地址与 Tailscale Serve 注入的身份标头；DNS 名称或登录账号变化时，重新运行同一脚本即可。
 
@@ -52,9 +52,10 @@ cd echo-podcast-memory
 
 - Mac 必须开机、已登录且能联网；Mac 睡眠或关机期间无法读取新的平台记录。
 - iPhone 和 Mac 必须都连入同一个 tailnet，iPhone 不要求与 Mac 处在同一个 Wi-Fi。
-- 平台令牌仍保存在 Mac 的系统钥匙串；快速回顾使用 Mac 已登录的 ChatGPT/Codex 订阅，不需要在 iPhone 输入 API Key。
-- 自动快速回顾由 Mac 后台执行，所以 Mac 还需要保持 ChatGPT/Codex 登录；iPhone 只显示队列状态和生成结果。
-- PWA 的静态外壳可离线打开；最近一次加载的数据会保存在 iPhone 本地用于断网浏览。
+- 平台令牌仍保存在 Mac 的系统钥匙串。可选 AI 默认关闭；若用户显式开启，它使用存放在 Mac Keychain 的 OpenAI API Key，并产生 Platform API 费用。
+- AI 会发送播客名、单集名及简介/时间轴；深度模式会上传整期音频。准确字段、独立开关与保留边界见主 README。
+- PWA 的静态外壳可离线打开，但个人统计与回顾默认不缓存。只有在页面显式开启“允许离线保存”后，当前 iPhone 才会保存最近资料；App 只读取 24 小时内的缓存，并在下次打开时清除过期数据。可随时点“立即清除”。
+- Tailscale Serve 的身份检查保护远程访问；不要启用 Funnel，不要把 `.ts.net` 地址转发给其他 tailnet 用户，也不要通过普通公共反向代理暴露服务。
 
 ## 取消后台服务
 
@@ -62,4 +63,4 @@ cd echo-podcast-memory
 ./scripts/uninstall-macos-agent.sh
 ```
 
-这只会取消自动启动，不会删除 SQLite 数据库、平台令牌或文字回顾。
+这只会取消自动启动，不会删除 SQLite 数据库、平台令牌、API Key 或文字回顾。完整清理还需清除当前设备的离线资料、删除 Web App/Safari 网站数据、撤销平台会话、删除 `com.podcast-memory.*` Keychain 项，并在备份后删除精确的 Application Support 与 Logs 目录；这些删除不可由回声恢复。

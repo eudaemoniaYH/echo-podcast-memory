@@ -22,6 +22,7 @@ export class XiaoyuzhouClient {
   async request(path, options = {}, allowRefresh = true) {
     const response = await this.fetchFn(`${API_BASE}${path}`, {
       ...options,
+      redirect: "error",
       headers: { ...this.headers(), ...(options.headers || {}) }
     });
     if (response.status === 401 && allowRefresh) {
@@ -38,6 +39,7 @@ export class XiaoyuzhouClient {
   async refresh() {
     const response = await this.fetchFn(`${API_BASE}/app_auth_tokens.refresh`, {
       method: "POST",
+      redirect: "error",
       headers: this.headers()
     });
     const payload = await response.json().catch(() => ({}));

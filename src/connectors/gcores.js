@@ -12,6 +12,7 @@ export class GcoresClient {
     let response;
     try {
       response = await this.fetchFn(`${API_BASE}${path}`, {
+        redirect: "error",
         headers: {
           accept: "application/vnd.api+json",
           "content-type": "application/vnd.api+json",

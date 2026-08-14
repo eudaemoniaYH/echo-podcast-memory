@@ -38,7 +38,7 @@ test("Apple Podcasts bypasses Keychain, baselines history, then queues one new c
     set: async () => {}
   };
   try {
-    const service = new SyncService({ db, credentials, applePodcastsClient });
+    const service = new SyncService({ db, credentials, applePodcastsClient, automaticSummariesEnabled: true });
     const first = await service.sync("apple-podcasts");
     assert.equal(first.importedCount, 1);
     assert.equal(first.automaticSummaryQueuedCount, 0);
@@ -77,7 +77,8 @@ test("Apple Podcasts creates its watermark on an empty valid library before the 
     const service = new SyncService({
       db,
       credentials: { get: async () => { throw new Error("不应读取钥匙串"); }, set: async () => {} },
-      applePodcastsClient
+      applePodcastsClient,
+      automaticSummariesEnabled: true
     });
     const empty = await service.sync("apple-podcasts");
     const baseline = db.getMeta("apple_podcasts_completion_baselined_at");
@@ -101,6 +102,44 @@ test("Apple Podcasts creates its watermark on an empty valid library before the 
     const firstListen = await service.sync("apple-podcasts");
     assert.equal(firstListen.automaticSummaryQueuedCount, 1);
     assert.equal(db.automaticSummaryStats().pending, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test("Apple Podcasts does not backfill an unobserved completion from before automatic summaries were enabled", async () => {
+  const db = new PodcastDatabase(":memory:");
+  db.setMeta("apple_podcasts_completion_baselined_at", "2026-07-01T00:00:00.000Z");
+  db.setMeta("auto_summary_enabled_at", "2026-08-01T00:00:00.000Z");
+  const applePodcastsClient = {
+    getHistory: () => ({
+      available: true,
+      episodes: [{
+        external_id: "old-unobserved-completion",
+        title: "启用前已完成",
+        duration: 1800,
+        playhead: 0,
+        has_been_played: 1,
+        play_count: 1,
+        playback_observed_at: appleTime("2026-07-15T00:00:00.000Z"),
+        completion_observed_at: appleTime("2026-07-15T00:00:00.000Z"),
+        description: "这条完成记录在自动回顾启用前发生，即使此前未被观察，也不应被补入队列。",
+        podcast_external_id: "old-show",
+        podcast_title: "旧记录"
+      }]
+    })
+  };
+  try {
+    const service = new SyncService({
+      db,
+      credentials: { get: async () => null, set: async () => {} },
+      applePodcastsClient,
+      automaticSummariesEnabled: true
+    });
+    const result = await service.sync("apple-podcasts");
+    assert.equal(result.automaticSummaryQueuedCount, 0);
+    assert.equal(db.automaticSummaryStats().pending, 0);
+    assert.equal(db.episodeDetail("apple-podcasts:episode:old-unobserved-completion").is_completed, 1);
   } finally {
     db.close();
   }
@@ -132,7 +171,8 @@ test("Apple Podcasts manual played state does not queue until a later real compl
     const service = new SyncService({
       db,
       credentials: { get: async () => null, set: async () => {} },
-      applePodcastsClient: { getHistory: () => ({ available: true, episodes: rows() }) }
+      applePodcastsClient: { getHistory: () => ({ available: true, episodes: rows() }) },
+      automaticSummariesEnabled: true
     });
     await service.sync("apple-podcasts");
     stage = 1;
@@ -230,7 +270,8 @@ test("Xiaoyuzhou finished flag queues once even when platform progress resets to
     const service = new SyncService({
       db,
       credentials: { set: async () => {} },
-      fetchFn: xiaoyuzhouFetch(calls, { isFinished: true, progressSeconds: 0 })
+      fetchFn: xiaoyuzhouFetch(calls, { isFinished: true, progressSeconds: 0 }),
+      automaticSummariesEnabled: true
     });
     const first = await service.syncXiaoyuzhou({ accessToken: "access", refreshToken: "refresh" });
     const second = await service.syncXiaoyuzhou({ accessToken: "access", refreshToken: "refresh" });
@@ -333,6 +374,36 @@ test("Gcores refreshes progress for all history rows but fetches metadata only f
   }
 });
 
+test("completion state is tracked while automatic summaries stay disabled and are not backfilled later", async () => {
+  const db = new PodcastDatabase(":memory:");
+  try {
+    seedAccountForIncrementalXiaoyuzhou(db);
+    db.setMeta("auto_summary_enabled_at", "2026-07-01T00:00:00.000Z");
+    const calls = { history: 0 };
+    const service = new SyncService({
+      db,
+      credentials: { set: async () => {} },
+      fetchFn: xiaoyuzhouFetch(calls, { isFinished: true, progressSeconds: 3600 })
+    });
+    const result = await service.syncXiaoyuzhou({ accessToken: "access", refreshToken: "refresh" });
+    assert.equal(result.automaticSummaryQueuedCount, 0);
+    assert.equal(db.automaticSummaryStats().pending, 0);
+    assert.equal(db.episodeDetail("xiaoyuzhou:episode:episode-1").is_completed, 1);
+
+    const enabledService = new SyncService({
+      db,
+      credentials: { set: async () => {} },
+      fetchFn: xiaoyuzhouFetch({ history: 0 }, { isFinished: true, progressSeconds: 3600 }),
+      automaticSummariesEnabled: true
+    });
+    const afterEnablement = await enabledService.syncXiaoyuzhou({ accessToken: "access", refreshToken: "refresh" });
+    assert.equal(afterEnablement.automaticSummaryQueuedCount, 0);
+    assert.equal(db.automaticSummaryStats().pending, 0);
+  } finally {
+    db.close();
+  }
+});
+
 test("Gcores does not fabricate playback samples when history has no timestamp", async () => {
   const db = new PodcastDatabase(":memory:");
   try {
@@ -367,6 +438,7 @@ test("Gcores queues only when progress crosses the inferred completion threshold
     const service = new SyncService({
       db,
       credentials: { set: async () => {} },
+      automaticSummariesEnabled: true,
       fetchFn: async (url) => {
         if (url.endsWith("/history")) {
           round += 1;

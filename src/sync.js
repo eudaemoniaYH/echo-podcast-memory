@@ -29,11 +29,18 @@ const incrementalXiaoyuzhouHistoryPages = () => {
 };
 
 export class SyncService {
-  constructor({ db, credentials, fetchFn = fetch, applePodcastsClient = null }) {
+  constructor({
+    db,
+    credentials,
+    fetchFn = fetch,
+    applePodcastsClient = null,
+    automaticSummariesEnabled = false
+  }) {
     this.db = db;
     this.credentials = credentials;
     this.fetchFn = fetchFn;
     this.applePodcastsClient = applePodcastsClient || new IsolatedApplePodcastsClient();
+    this.automaticSummariesEnabled = automaticSummariesEnabled;
     this.running = new Set();
   }
 
@@ -87,7 +94,12 @@ export class SyncService {
     }
 
     const firstCompletionBaseline = !this.db.getMeta("apple_podcasts_completion_baselined_at");
-    const completionEnabledAt = this.db.getMeta("apple_podcasts_completion_baselined_at");
+    const completionEnabledAt = [
+      this.db.getMeta("apple_podcasts_completion_baselined_at"),
+      this.db.getMeta("auto_summary_enabled_at")
+    ].filter((value) => value && !Number.isNaN(Date.parse(value)))
+      .sort()
+      .at(-1) || null;
     if (firstCompletionBaseline) {
       this.db.setMeta("apple_podcasts_completion_baselined_at", new Date().toISOString());
     }
@@ -127,12 +139,13 @@ export class SyncService {
         const completion = this.db.observeEpisodeCompletion({
           episodeId,
           platform: "apple-podcasts",
-          completed: playback.automaticSummaryEligible,
+          completed: playback.completed,
           observedAt: playback.completionObservedAt,
           enabledAt: firstCompletionBaseline ? null : completionEnabledAt,
-          automaticSummaryEligible: playback.automaticSummaryEligible
+          automaticSummaryEligible: playback.automaticSummaryEligible,
+          queueEnabled: this.automaticSummariesEnabled
         });
-        if (completion.queued) automaticSummaryQueuedCount += 1;
+        if (completion?.queued) automaticSummaryQueuedCount += 1;
       }
       visibleHistorySeconds += playback.estimatedListenedSeconds;
     }
@@ -224,9 +237,10 @@ export class SyncService {
           platform: "xiaoyuzhou",
           completed: Boolean(episode.raw?.isFinished),
           observedAt: sample.observedAt,
-          enabledAt: autoSummaryEnabledAt
+          enabledAt: autoSummaryEnabledAt,
+          queueEnabled: this.automaticSummariesEnabled
         });
-        if (completion.queued) automaticSummaryQueuedCount += 1;
+        if (completion?.queued) automaticSummaryQueuedCount += 1;
       }
     }
     if (!historyWasBackfilled && reachedHistoryEnd) {
@@ -326,9 +340,10 @@ export class SyncService {
         platform: "gcores",
         completed,
         observedAt,
-        enabledAt: autoSummaryEnabledAt
+        enabledAt: autoSummaryEnabledAt,
+        queueEnabled: this.automaticSummariesEnabled
       });
-      if (completion.queued) automaticSummaryQueuedCount += 1;
+      if (completion?.queued) automaticSummaryQueuedCount += 1;
     }
     this.db.upsertListeningTotal({
       platform: "gcores",

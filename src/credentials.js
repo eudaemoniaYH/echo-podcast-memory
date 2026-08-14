@@ -1,12 +1,14 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const SERVICE_PREFIX = "com.podcast-memory";
 
 export class KeychainCredentialStore {
-  constructor({ account = "default" } = {}) {
+  constructor({ account = "default", execFileFn = execFileAsync, spawnFn = spawn } = {}) {
     this.account = account;
+    this.execFileFn = execFileFn;
+    this.spawnFn = spawnFn;
   }
 
   service(platform) {
@@ -18,7 +20,7 @@ export class KeychainCredentialStore {
 
   async get(platform) {
     try {
-      const { stdout } = await execFileAsync("security", [
+      const { stdout } = await this.execFileFn("security", [
         "find-generic-password",
         "-a",
         this.account,
@@ -37,21 +39,42 @@ export class KeychainCredentialStore {
 
   async set(platform, credentials) {
     const value = JSON.stringify(credentials);
-    await execFileAsync("security", [
-      "add-generic-password",
-      "-a",
-      this.account,
-      "-s",
-      this.service(platform),
-      "-w",
-      value,
-      "-U"
-    ]);
+    await new Promise((resolve, reject) => {
+      const child = this.spawnFn("security", [
+        "add-generic-password",
+        "-a",
+        this.account,
+        "-s",
+        this.service(platform),
+        "-U",
+        "-w"
+      ], { stdio: ["pipe", "ignore", "pipe"] });
+      let stderr = "";
+      let settled = false;
+      const finish = (callback) => {
+        if (settled) return;
+        settled = true;
+        callback();
+      };
+      child.stderr?.on("data", (chunk) => {
+        stderr = `${stderr}${chunk}`.slice(-8_000);
+      });
+      child.on("error", (error) => finish(() => reject(error)));
+      child.on("close", (code) => finish(() => {
+        if (code === 0) return resolve();
+        const error = new Error(`security add-generic-password failed with exit code ${code}`);
+        error.code = code;
+        error.stderr = stderr;
+        reject(error);
+      }));
+      child.stdin?.on("error", (error) => finish(() => reject(error)));
+      child.stdin.end(`${value}\n${value}\n`);
+    });
   }
 
   async delete(platform) {
     try {
-      await execFileAsync("security", [
+      await this.execFileFn("security", [
         "delete-generic-password",
         "-a",
         this.account,
