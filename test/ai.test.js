@@ -174,6 +174,17 @@ test("local validation rejects malformed structured summary output", async () =>
 
 test("stripMarkup removes HTML before sending source text", () => {
   assert.equal(stripMarkup("<p>第一段 &amp; 第二段</p>"), "第一段 & 第二段");
+  assert.equal(
+    stripMarkup('<script>alert(1)</script foo="bar"><p>保留 &amp;lt; 文本</p>'),
+    "保留 &lt; 文本"
+  );
+  assert.equal(stripMarkup("&#x26;amp; &#38;amp; &#x26;#38;"), "&amp; &amp; &#38;");
+  for (const falseClose of ["< /script>", "</ script>", "</script.foo>", "</script=foo>", "</script!>"]) {
+    assert.equal(stripMarkup(`<script>secret${falseClose}LEAK</script><p>ok</p>`), "ok");
+  }
+  const malformedStart = performance.now();
+  assert.equal(stripMarkup("<".repeat(100_000)), "<".repeat(100_000));
+  assert.ok(performance.now() - malformedStart < 1_000);
 });
 
 test("audio download rejects an untrusted redirect before ffmpeg sees it", async () => {

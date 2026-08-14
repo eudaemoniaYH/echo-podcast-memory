@@ -1,3 +1,5 @@
+import { htmlToPlainText } from "./text.js";
+
 const TOPIC_RULES = [
   ["AI 与科技", /\b(ai|llm|gpu|apple|openai|芯片|人工智能|大模型|科技|互联网|机器人)\b/i],
   ["游戏", /(游戏|主机|任天堂|索尼|xbox|steam|game|电竞)/i],
@@ -130,22 +132,6 @@ export function normalizeAppleTimestamp(value) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-const stripHtml = (value = "") => String(value)
-  .replace(/<br\s*\/?>/gi, "\n")
-  .replace(/<\/p\s*>/gi, "\n\n")
-  .replace(/<[^>]+>/g, " ")
-  .replace(/&nbsp;/gi, " ")
-  .replace(/&amp;/gi, "&")
-  .replace(/&lt;/gi, "<")
-  .replace(/&gt;/gi, ">")
-  .replace(/&quot;/gi, '"')
-  .replace(/&#39;|&apos;/gi, "'")
-  .replace(/[ \t]+\n/g, "\n")
-  .replace(/\n[ \t]+/g, "\n")
-  .replace(/\n{3,}/g, "\n\n")
-  .replace(/[ \t]{2,}/g, " ")
-  .trim();
-
 export function normalizeApplePodcastsEpisode(raw) {
   const durationSeconds = seconds(raw.duration);
   const progressSeconds = Math.min(durationSeconds || Number.MAX_SAFE_INTEGER, seconds(raw.playhead));
@@ -164,7 +150,7 @@ export function normalizeApplePodcastsEpisode(raw) {
     !manualMarkedAt || !playbackObservedAt || manualMarkedAt >= playbackObservedAt
   );
   const automaticSummaryEligible = completed && !manuallyCompleted;
-  const description = stripHtml(raw.description || "");
+  const description = htmlToPlainText(raw.description || "");
   return {
     episode: {
       platform: "apple-podcasts",

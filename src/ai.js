@@ -4,6 +4,7 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { htmlToPlainText } from "./text.js";
 
 export const SUMMARY_MODEL = process.env.OPENAI_SUMMARY_MODEL || "gpt-5.6-luna";
 export const SUMMARY_MODEL_LABEL = "OpenAI Platform API · API 按量计费";
@@ -44,17 +45,7 @@ const summarySchema = {
   required: ["category", "summary", "key_points", "outline", "keywords", "people", "review_questions", "limitation"]
 };
 
-const stripMarkup = (value = "") => String(value)
-  .replace(/<script[\s\S]*?<\/script>/gi, " ")
-  .replace(/<style[\s\S]*?<\/style>/gi, " ")
-  .replace(/<[^>]+>/g, " ")
-  .replace(/&nbsp;/gi, " ")
-  .replace(/&amp;/gi, "&")
-  .replace(/&lt;/gi, "<")
-  .replace(/&gt;/gi, ">")
-  .replace(/[ \t]+/g, " ")
-  .replace(/\n{3,}/g, "\n\n")
-  .trim();
+const stripMarkup = htmlToPlainText;
 
 const parseApiError = async (response) => {
   const payload = await response.json().catch(() => ({}));
